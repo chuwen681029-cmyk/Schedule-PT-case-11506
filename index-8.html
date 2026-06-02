@@ -161,6 +161,7 @@ const S = {
   // 首次設定 / 修改密碼
   setupMode:false, setupUser:'', setupPass:'', setupPass2:'', setupErr:'', setupOk:'', setupSaving:false,
   lineIds:{}, lineIdsEdit:{}, lineIdsSaveOk:false, lineIdsSaving:false,
+  lineTestResult:{}, lineTestLoading:{},
 };
 
 // ── 期間計算 ──────────────────────────────────────────────────────────
@@ -522,6 +523,7 @@ document.addEventListener('click',e=>{
   if(a==='exp-det-csv'){const p=getSelectedPeriod(S.detailPeriod);dlCSV('全部派案明細',getDetailRows(p),p?p.monthKey:'全期');}
   if(a==='exp-det-xlsx'){const p=getSelectedPeriod(S.detailPeriod);dlXLSX('全部派案明細',getDetailRows(p),p?p.monthKey:'全期');}
   if(a==='save-lineids') saveLineIds();
+  if(a==='test-line') testLineNotify(v);
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&(S.tab==='settings'||S.tab==='lineids')&&!S.settingsAuth){
@@ -567,6 +569,36 @@ async function saveLineIds(){
 function initLineIdsEdit(){
   S.lineIdsEdit={};
   TB.forEach(t=>{ S.lineIdsEdit[t.id]=S.lineIds[t.id]||''; });
+}
+
+async function testLineNotify(tid){
+  const lineId=S.lineIdsEdit[tid]||S.lineIds[tid]||'';
+  if(!lineId){ S.lineTestResult[tid]={ok:false,msg:'尚未設定 LINE User ID'}; render(); return; }
+  const t=TB.find(x=>x.id===tid);
+  S.lineTestLoading[tid]=true; S.lineTestResult[tid]=null; render();
+  try{
+    const res=await fetch(MAKE_WEBHOOK_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        lineUserId:    lineId,
+        therapistName: t?.name||tid,
+        dateStr:       today(),
+        source:        '測試',
+        department:    '測試科別',
+        time:          '測試時段',
+        complexity:    1,
+      })
+    });
+    if(res.ok){
+      S.lineTestResult[tid]={ok:true,msg:'✅ Webhook 送出成功（狀態 '+res.status+'），請確認 LINE 是否收到訊息'};
+    }else{
+      S.lineTestResult[tid]={ok:false,msg:'❌ Webhook 回應錯誤（狀態 '+res.status+'）'};
+    }
+  }catch(e){
+    S.lineTestResult[tid]={ok:false,msg:'❌ 送出失敗：'+e.message+'（可能是網路或 CORS 問題）'};
+  }
+  S.lineTestLoading[tid]=false; render();
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -800,6 +832,8 @@ function renderLineIds(){
   const rows = TB.map(t=>{
     const val = S.lineIdsEdit[t.id]||'';
     const saved = S.lineIds[t.id]||'';
+    const testRes = S.lineTestResult[t.id];
+    const testing = S.lineTestLoading[t.id];
     return `<tr>
       <td><strong>${t.name}</strong></td>
       <td class="c-muted">${t.amDept}/${t.pmDept}</td>
@@ -809,10 +843,16 @@ function renderLineIds(){
           style="width:100%;padding:6px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;outline:none;font-family:inherit"
           onfocus="this.style.borderColor='#1d4ed8'"
           onblur="this.style.borderColor='#cbd5e1'">
+        ${testRes?`<div style="font-size:11px;margin-top:4px;color:${testRes.ok?'#15803d':'#dc2626'}">${testRes.msg}</div>`:''}
       </td>
       <td>${saved
         ? '<span style=\"color:#15803d;font-size:11px\">✅ 已設定</span>'
         : '<span style=\"color:#94a3b8;font-size:11px\">未設定</span>'}</td>
+      <td>
+        <button class="btn-exp" data-a="test-line" data-v="${t.id}" ${testing?'disabled':''} style="white-space:nowrap">
+          ${testing?'⏳':'📨'} 測試
+        </button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -834,7 +874,7 @@ function renderLineIds(){
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>治療師</th><th>科別</th><th>LINE User ID</th><th>狀態</th>
+            <th>治療師</th><th>科別</th><th>LINE User ID</th><th>狀態</th><th>測試</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
