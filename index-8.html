@@ -295,10 +295,11 @@ onAuthStateChanged(auth,user=>{
 const MAKE_WEBHOOK_URL = 'https://hook.us2.make.com/5unjuqa573p15bc7pffit7h25pe6te6k';
 
 function sendLineNotify(data) {
-  // 完全非同步，絕不影響派案作業
   try {
     const lineId = (S.lineIds && S.lineIds[data.therapistId]) || '';
-    if (!lineId) return; // 沒有設定 LINE ID 就略過
+    console.log('[LINE] therapistId:', data.therapistId, '| lineId:', lineId, '| S.lineIds:', JSON.stringify(S.lineIds));
+    if (!lineId) { console.log('[LINE] 略過：該治療師無 LINE ID'); return; }
+    console.log('[LINE] 送出 webhook →', MAKE_WEBHOOK_URL);
     fetch(MAKE_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -311,9 +312,10 @@ function sendLineNotify(data) {
         time:          data.time          || '',
         complexity:    data.complexity    || '',
       })
-    }).catch(e => console.log('LINE notify failed:', e));
+    }).then(r=>console.log('[LINE] 回應狀態:', r.status))
+      .catch(e=>console.log('[LINE] fetch 失敗:', e));
   } catch(e) {
-    console.log('LINE notify error:', e);
+    console.log('[LINE] 錯誤:', e);
   }
 }
 
