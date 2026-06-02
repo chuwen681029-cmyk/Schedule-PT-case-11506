@@ -498,8 +498,10 @@ function dlTemplate(){
   XLSX.writeFile(wb,`格數設定模板_${mk(S.date)}.xlsx`);
 }
 function getSelectedPeriod(key){
-  if(key==='current') return null;
-  return getPeriods().find(p=>p.monthKey===key)||null;
+  const periods=getPeriods();
+  if(!periods.length) return null;
+  if(key==='current'||!key) return periods[periods.length-1];
+  return periods.find(p=>p.monthKey===key)||periods[periods.length-1];
 }
 
 // ── Event delegation ─────────────────────────────────────────────────
@@ -611,14 +613,15 @@ const T=(f,v,l,c)=>`<button class="tog${String(c)===String(v)?' active':''}" dat
 
 function periodSelectHtml(id,selected){
   const periods=getPeriods();
-  const opts=[
-    `<option value="current"${selected==='current'?' selected':''}>全部累積（跨期）</option>`,
-    ...periods.map(p=>`<option value="${p.monthKey}"${selected===p.monthKey?' selected':''}>${p.label}</option>`)
-  ].join('');
+  if(!periods.length) return `<div class="period-wrap"><select id="${id}" class="period-select"><option value="">尚無格數設定期間</option></select></div>`;
+  // 預設選最新一期
+  const latest=periods[periods.length-1].monthKey;
+  const eff=(selected==='current'||!periods.find(p=>p.monthKey===selected))?latest:selected;
+  const opts=periods.map(p=>`<option value="${p.monthKey}"${eff===p.monthKey?' selected':''}>${p.label}</option>`).join('');
   return `<div class="period-wrap"><select id="${id}" class="period-select">${opts}</select></div>`;
 }
 function periodInfoHtml(period){
-  if(!period) return `<div class="notice n-slate">顯示全部期間累積資料（格數以最新期間計算）</div>`;
+  if(!period) return '';
   const end=period.endDate?period.endDate:'至今';
   return `<div class="notice n-blue">📅 期間：${period.startDate} ～ ${end}｜格數設定月份：${period.monthKey}</div>`;
 }
