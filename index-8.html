@@ -250,7 +250,10 @@ const validList=()=>{
       else if(S.time==='下午'&&t.pmDept===S.dept){match=true;rem=ts.pmR;ct='下午';}
     }
     return match?[{...t,rem,ct,disabled:ts.today>=3}]:[];
-  }).sort((a,b)=>b.rem-a.rem);
+  }).sort((a,b)=>{
+    if(a.disabled!==b.disabled) return a.disabled?1:-1;
+    return b.rem-a.rem;
+  });
 };
 
 // ── Firebase ──────────────────────────────────────────────────────────
