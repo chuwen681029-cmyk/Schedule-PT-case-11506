@@ -124,9 +124,6 @@ const firebaseConfig = {
 };
 const APP_ID = 'pt-system-11504';
 
-// ── 格數設定頁登入帳密（可在此修改）────────────────────────────────────
-const SETTINGS_USER = 'Y00780';
-const SETTINGS_PASS = '5323911';
 
 const TB = [
   { id:'PD', name:'PD吳淑妮', amDept:'骨科', pmDept:'骨科' },
@@ -158,8 +155,11 @@ const S = {
   editSlots:{}, preview:null, importErr:'', importOk:'',
   saveOk:false, saving:false, submitting:false,
   summaryPeriod:'current', detailPeriod:'current',
-  // 格數設定頁登入狀態（重新整理後需重新登入）
   settingsAuth:false, loginUser:'', loginPass:'', loginErr:'',
+  // 管理員帳密（從 Firebase 載入，null=尚未載入，{}=未設定）
+  adminCred:null, adminCredLoaded:false,
+  // 首次設定 / 修改密碼
+  setupMode:false, setupUser:'', setupPass:'', setupPass2:'', setupErr:'', setupOk:'', setupSaving:false,
   lineIds:{}, lineIdsEdit:{}, lineIdsSaveOk:false, lineIdsSaving:false,
 };
 
@@ -259,6 +259,7 @@ const aCol=()=>collection(db,'artifacts',APP_ID,'public','data','assignments');
 const sCol=()=>collection(db,'artifacts',APP_ID,'public','data','monthlySlots');
 const hCol=()=>collection(db,'artifacts',APP_ID,'public','data','slotsHistory');
 const lCol=()=>collection(db,'artifacts',APP_ID,'public','data','lineIds');
+const authDoc=()=>doc(db,'artifacts',APP_ID,'public','data','adminAuth','credentials');
 
 signInAnonymously(auth).catch(console.error);
 onAuthStateChanged(auth,user=>{
@@ -277,6 +278,12 @@ onAuthStateChanged(auth,user=>{
     S.lineIds={};
     snap.docs.forEach(d=>{ S.lineIds[d.id]=d.data().lineId||''; });
     render();
+  });
+  // 監聽管理員帳密
+  onSnapshot(authDoc(),snap=>{
+    if(snap.exists()){ S.adminCred=snap.data(); }
+    else { S.adminCred={}; }
+    S.adminCredLoaded=true; render();
   });
   document.getElementById('loading').style.display='none';
   document.getElementById('app').style.display='block';
@@ -366,12 +373,28 @@ function initEdit(){
 
 // ── 登入驗證 ──────────────────────────────────────────────────────────
 function tryLogin(){
-  if(S.loginUser===SETTINGS_USER && S.loginPass===SETTINGS_PASS){
+  if(!S.adminCred?.user){ S.loginErr='尚未設定帳號，請先建立帳號。'; render(); return; }
+  if(S.loginUser===S.adminCred.user && S.loginPass===S.adminCred.pass){
     S.settingsAuth=true; S.loginErr=''; S.loginUser=''; S.loginPass='';
     initEdit(); render();
   }else{
     S.loginErr='帳號或密碼錯誤，請重新輸入。'; render();
   }
+}
+
+async function saveAdminCred(){
+  if(S.setupSaving) return;
+  const u=S.setupUser.trim(), p=S.setupPass.trim(), p2=S.setupPass2.trim();
+  if(!u){ S.setupErr='帳號不能為空。'; render(); return; }
+  if(p.length<4){ S.setupErr='密碼至少需要4個字元。'; render(); return; }
+  if(p!==p2){ S.setupErr='兩次密碼輸入不一致。'; render(); return; }
+  S.setupSaving=true; S.setupErr=''; render();
+  try{
+    await setDoc(authDoc(),{user:u, pass:p});
+    S.setupOk='帳號設定成功！請重新登入。';
+    S.setupMode=false; S.setupUser=''; S.setupPass=''; S.setupPass2='';
+  }catch(e){ S.setupErr='儲存失敗：'+e.message; }
+  S.setupSaving=false; render();
 }
 
 // ── File Import ───────────────────────────────────────────────────────
@@ -490,7 +513,10 @@ document.addEventListener('click',e=>{
   if(a==='dl-tpl') dlTemplate();
   if(a==='upload') document.getElementById('fi').click();
   if(a==='login') tryLogin();
-  if(a==='logout'){S.settingsAuth=false;S.loginUser='';S.loginPass='';S.loginErr='';render();}
+  if(a==='logout'){S.settingsAuth=false;S.loginUser='';S.loginPass='';S.loginErr='';S.setupOk='';render();}
+  if(a==='show-setup'){S.setupMode=true;S.setupErr='';S.setupOk='';S.setupUser='';S.setupPass='';S.setupPass2='';render();}
+  if(a==='cancel-setup'){S.setupMode=false;S.setupErr='';render();}
+  if(a==='save-admin-cred') saveAdminCred();
   if(a==='exp-sum-csv'){const p=getSelectedPeriod(S.summaryPeriod);dlCSV('格數統計總表',getSummaryRows(p),p?p.monthKey:'全期');}
   if(a==='exp-sum-xlsx'){const p=getSelectedPeriod(S.summaryPeriod);dlXLSX('格數統計總表',getSummaryRows(p),p?p.monthKey:'全期');}
   if(a==='exp-det-csv'){const p=getSelectedPeriod(S.detailPeriod);dlCSV('全部派案明細',getDetailRows(p),p?p.monthKey:'全期');}
@@ -498,7 +524,9 @@ document.addEventListener('click',e=>{
   if(a==='save-lineids') saveLineIds();
 });
 document.addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&S.tab==='settings'&&!S.settingsAuth) tryLogin();
+  if(e.key==='Enter'&&(S.tab==='settings'||S.tab==='lineids')&&!S.settingsAuth){
+    if(S.setupMode) saveAdminCred(); else tryLogin();
+  }
 });
 document.addEventListener('change',e=>{
   const el=e.target;
@@ -510,6 +538,9 @@ document.addEventListener('change',e=>{
   if(el.id==='detail-period'){S.detailPeriod=el.value;render();}
   if(el.id==='login-user') S.loginUser=el.value;
   if(el.id==='login-pass') S.loginPass=el.value;
+  if(el.id==='setup-user') S.setupUser=el.value;
+  if(el.id==='setup-pass') S.setupPass=el.value;
+  if(el.id==='setup-pass2') S.setupPass2=el.value;
   if(el.dataset.am){if(!S.editSlots[el.dataset.am])S.editSlots[el.dataset.am]={am:0,pm:0,iam:0,ipm:0};S.editSlots[el.dataset.am].am=parseInt(el.value)||0;}
   if(el.dataset.pm){if(!S.editSlots[el.dataset.pm])S.editSlots[el.dataset.pm]={am:0,pm:0,iam:0,ipm:0};S.editSlots[el.dataset.pm].pm=parseInt(el.value)||0;}
   if(el.dataset.iam){if(!S.editSlots[el.dataset.iam])S.editSlots[el.dataset.iam]={am:0,pm:0,iam:0,ipm:0};S.editSlots[el.dataset.iam].iam=parseInt(el.value)||0;}
@@ -646,20 +677,43 @@ function renderDetails(){
 }
 
 function renderSettingsLogin(){
+  // 尚未從 Firebase 載入
+  if(!S.adminCredLoaded){
+    return `<div class="login-box"><div class="login-icon">⏳</div><div class="login-title">載入中...</div></div>`;
+  }
+  // 首次設定 或 點擊「修改帳密」
+  if(!S.adminCred?.user || S.setupMode){
+    const isFirst=!S.adminCred?.user;
+    return `<div class="login-box">
+      <div class="login-icon">${isFirst?'🔑':'🔒'}</div>
+      <div class="login-title">${isFirst?'首次設定管理員帳號':'修改管理員帳號密碼'}</div>
+      <div class="login-sub">${isFirst?'尚未設定帳號，請建立管理員帳號及密碼，設定後將同步儲存至 Firebase。':'輸入新的帳號及密碼'}</div>
+      <div class="login-field"><label for="setup-user">帳號</label>
+        <input id="setup-user" type="text" value="${S.setupUser}" placeholder="設定帳號" autocomplete="username"></div>
+      <div class="login-field"><label for="setup-pass">密碼（至少4字元）</label>
+        <input id="setup-pass" type="password" value="${S.setupPass}" placeholder="設定密碼" autocomplete="new-password"></div>
+      <div class="login-field"><label for="setup-pass2">確認密碼</label>
+        <input id="setup-pass2" type="password" value="${S.setupPass2}" placeholder="再次輸入密碼" autocomplete="new-password"></div>
+      <div class="login-err">${S.setupErr}</div>
+      <button class="btn-primary" data-a="save-admin-cred" ${S.setupSaving?'disabled':''}>${S.setupSaving?'⏳ 儲存中...':'💾 儲存帳號設定'}</button>
+      ${!isFirst?`<div style="text-align:center;margin-top:10px"><button class="btn-cancel" data-a="cancel-setup">取消</button></div>`:''}
+    </div>`;
+  }
+  // 一般登入
   return `<div class="login-box">
     <div class="login-icon">🔒</div>
-    <div class="login-title">月份格數設定</div>
+    <div class="login-title">管理員登入</div>
     <div class="login-sub">請輸入管理員帳號及密碼</div>
-    <div class="login-field">
-      <label for="login-user">帳號</label>
-      <input id="login-user" type="text" value="${S.loginUser}" placeholder="請輸入帳號" autocomplete="username">
-    </div>
-    <div class="login-field">
-      <label for="login-pass">密碼</label>
-      <input id="login-pass" type="password" value="${S.loginPass}" placeholder="請輸入密碼" autocomplete="current-password">
-    </div>
+    ${S.setupOk?`<div class="notice n-green" style="margin-bottom:12px">✅ ${S.setupOk}</div>`:''}
+    <div class="login-field"><label for="login-user">帳號</label>
+      <input id="login-user" type="text" value="${S.loginUser}" placeholder="請輸入帳號" autocomplete="username"></div>
+    <div class="login-field"><label for="login-pass">密碼</label>
+      <input id="login-pass" type="password" value="${S.loginPass}" placeholder="請輸入密碼" autocomplete="current-password"></div>
     <div class="login-err">${S.loginErr}</div>
     <button class="btn-primary" data-a="login">登入</button>
+    <div style="text-align:center;margin-top:10px">
+      <button class="btn-cancel" data-a="show-setup" style="font-size:12px;color:#94a3b8;background:none;border:none;cursor:pointer;">修改帳號密碼</button>
+    </div>
   </div>`;
 }
 
@@ -698,7 +752,10 @@ function renderSettings(){
         <div class="card-title">⚙️ 月份格數設定</div>
         <div class="row-gap">
           <div class="row-gap"><span class="field-label" style="margin:0">設定月份：</span><input id="mp" type="month" value="${m}" class="date-input"></div>
-          <button class="logout-btn" data-a="logout">登出</button>
+          <div style="display:flex;gap:6px">
+            <button class="logout-btn" data-a="show-setup">修改帳密</button>
+            <button class="logout-btn" data-a="logout">登出</button>
+          </div>
         </div>
       </div>
       <div class="notice ${hasData?'n-green':'n-amber'}">${hasData?'✅ '+m+' 已有格數設定':'⚠️ '+m+' 目前使用預設格數'}</div>
@@ -763,7 +820,10 @@ function renderLineIds(){
     <div class="card">
       <div class="card-header">
         <div class="card-title">📱 治療師 LINE ID 設定</div>
-        <button class="logout-btn" data-a="logout">登出</button>
+        <div style="display:flex;gap:6px">
+          <button class="logout-btn" data-a="show-setup">修改帳密</button>
+          <button class="logout-btn" data-a="logout">登出</button>
+        </div>
       </div>
       <div class="notice n-blue" style="font-size:12px">
         💡 每位治療師需先加 <strong>YLH-PT（@796wzzsw）</strong> 為好友，才能收到推播。<br>
